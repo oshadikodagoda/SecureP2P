@@ -1,18 +1,18 @@
 package securep2p.core;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
 
-/**
- * Listens on a port and accepts incoming peer connections.
- */
 public class PeerServer {
 
     private final int port;
     private final MessageListener listener;
     private ServerSocket serverSocket;
-    private ConnectionHandler currentConnection;
+    private List<ConnectionHandler> connections = new ArrayList<>();
     private volatile boolean running = false;
 
     public PeerServer(int port, MessageListener listener) {
@@ -20,9 +20,6 @@ public class PeerServer {
         this.listener = listener;
     }
 
-    /**
-     * Starts listening in a background thread.
-     */
     public void start() {
         running = true;
         Thread acceptThread = new Thread(this::acceptLoop, "PeerServerAccept");
@@ -38,12 +35,10 @@ public class PeerServer {
                 Socket socket = serverSocket.accept();
                 System.out.println("[PeerServer] Incoming connection from " + socket.getRemoteSocketAddress());
 
-                // For this step we allow only one active connection.
-                if (currentConnection != null) {
-                    currentConnection.close();
-                }
-                currentConnection = new ConnectionHandler(socket, listener, true);
-                currentConnection.start();
+                // Add new connection to the list
+                ConnectionHandler newConnection = new ConnectionHandler(socket, listener, true);
+                connections.add(newConnection);
+                newConnection.start();
             }
         } catch (IOException e) {
             if (running) {
@@ -52,20 +47,28 @@ public class PeerServer {
         }
     }
 
-    /**
-     * Sends a message to the currently connected peer.
-     * Returns false if there is no active connection.
-     */
+    // Broadcasts message to all connected clients
     public boolean send(String message) {
-        if (currentConnection != null && currentConnection.isRunning()) {
-            currentConnection.send(message);
-            return true;
+        boolean sent = false;
+        for (ConnectionHandler conn : connections) {
+            if (conn.isRunning()) {
+                conn.send(message);
+                sent = true;
+            }
         }
-        return false;
+        return sent;
     }
 
-    public boolean hasActiveConnection() {
-        return currentConnection != null && currentConnection.isRunning();
+    // Broadcasts file to all connected clients
+    public boolean sendFile(File file) {
+        boolean sent = false;
+        for (ConnectionHandler conn : connections) {
+            if (conn.isRunning()) {
+                conn.sendFile(file);
+                sent = true;
+            }
+        }
+        return sent;
     }
 
     public void stop() {
@@ -77,16 +80,8 @@ public class PeerServer {
         } catch (IOException e) {
             System.err.println("[PeerServer] Stop error: " + e.getMessage());
         }
-        if (currentConnection != null) {
-            currentConnection.close();
+        for (ConnectionHandler conn : connections) {
+            conn.close();
         }
-    }
-    
-    public boolean sendFile(java.io.File file) {
-        if (currentConnection != null && currentConnection.isRunning()) {
-            currentConnection.sendFile(file);
-            return true;
-        }
-        return false;
     }
 }
