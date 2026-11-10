@@ -11,8 +11,8 @@ import javax.crypto.SecretKey;
 public class ConnectionHandler {
 
     private final Socket socket;
-    private final DataInputStream dataIn;  // Used for reading bytes
-    private final DataOutputStream dataOut; // Used for writing bytes
+    private final DataInputStream dataIn;
+    private final DataOutputStream dataOut;
     private final MessageListener listener;
     private final boolean isServer;
     private volatile boolean running = true;
@@ -24,7 +24,6 @@ public class ConnectionHandler {
         this.listener = listener;
         this.isServer = isServer;
         
-        // We use DataStreams to handle both text (UTF) and raw bytes (files)
         this.dataIn = new DataInputStream(socket.getInputStream());
         this.dataOut = new DataOutputStream(socket.getOutputStream());
         
@@ -70,17 +69,17 @@ public class ConnectionHandler {
     private void readLoop() {
         try {
             while (running) {
-                // Read the message type
                 String header = dataIn.readUTF();
                 
                 if (header.equals("[FILE]")) {
-                    // File transfer logic
                     String fileName = dataIn.readUTF();
                     int length = dataIn.readInt();
                     byte[] encryptedBytes = new byte[length];
                     dataIn.readFully(encryptedBytes);
                     
-                    // Decrypt file bytes
+                    // PROOF OF ENCRYPTION: Print the incoming encrypted file size
+                    System.out.println("[NETWORK IN] Received encrypted file data (" + length + " bytes) for: " + fileName);
+                    
                     byte[] decryptedBytes = CryptoEngine.decryptAESBytes(encryptedBytes, aesKey);
                     
                     if (listener != null) {
@@ -88,8 +87,11 @@ public class ConnectionHandler {
                     }
                     
                 } else if (header.equals("[MSG]")) {
-                    // Text message logic
                     String encryptedMessage = dataIn.readUTF();
+                    
+                    // PROOF OF ENCRYPTION: Print the incoming encrypted text!
+                    System.out.println("[NETWORK IN] Received Encrypted text: " + encryptedMessage);
+                    
                     String decryptedMessage = CryptoEngine.decryptAES(encryptedMessage, aesKey);
                     if (listener != null) {
                         listener.onMessageReceived(decryptedMessage);
@@ -112,6 +114,10 @@ public class ConnectionHandler {
         if (running && dataOut != null && aesKey != null) {
             try {
                 String encryptedMessage = CryptoEngine.encryptAES(message, aesKey);
+                
+                // PROOF OF ENCRYPTION: Print the outgoing encrypted text!
+                System.out.println("[NETWORK OUT] Sending Encrypted text: " + encryptedMessage);
+                
                 dataOut.writeUTF("[MSG]");
                 dataOut.writeUTF(encryptedMessage);
                 dataOut.flush();
@@ -124,23 +130,22 @@ public class ConnectionHandler {
     public void sendFile(File file) {
         if (running && dataOut != null && aesKey != null) {
             try {
-                // Read raw file bytes
                 byte[] fileBytes = new byte[(int) file.length()];
                 try (FileInputStream fis = new FileInputStream(file)) {
                     fis.read(fileBytes);
                 }
 
-                // Encrypt file bytes using AES
                 byte[] encryptedBytes = CryptoEngine.encryptAESBytes(fileBytes, aesKey);
 
-                // Send header, filename, length, then raw bytes
+                // PROOF OF ENCRYPTION: Print the outgoing encrypted file size
+                System.out.println("[NETWORK OUT] Sending encrypted file data (" + encryptedBytes.length + " bytes) for: " + file.getName());
+
                 dataOut.writeUTF("[FILE]");
                 dataOut.writeUTF(file.getName());
                 dataOut.writeInt(encryptedBytes.length);
                 dataOut.write(encryptedBytes);
                 dataOut.flush();
                 
-                System.out.println("[NETWORK OUT] Sent encrypted file: " + file.getName());
             } catch (Exception e) {
                 System.err.println("[File] Failed to send file: " + e.getMessage());
             }
