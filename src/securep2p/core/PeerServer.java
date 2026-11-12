@@ -6,13 +6,17 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class PeerServer {
 
     private final int port;
     private final MessageListener listener;
     private ServerSocket serverSocket;
-    private List<ConnectionHandler> connections = new ArrayList<>();
+    
+    // We use a Map to store IP:Port as the key, and the ConnectionHandler as the value
+    private Map<String, ConnectionHandler> connections = new ConcurrentHashMap<>();
     private volatile boolean running = false;
 
     public PeerServer(int port, MessageListener listener) {
@@ -33,12 +37,19 @@ public class PeerServer {
             System.out.println("[PeerServer] Listening on port " + port);
             while (running) {
                 Socket socket = serverSocket.accept();
-                System.out.println("[PeerServer] Incoming connection from " + socket.getRemoteSocketAddress());
+                
+                // Get the IP and Port of the connected client to use as a name
+                String clientId = socket.getRemoteSocketAddress().toString().replace("/", "");
+                System.out.println("[PeerServer] Incoming connection from " + clientId);
 
-                // Add new connection to the list
                 ConnectionHandler newConnection = new ConnectionHandler(socket, listener, true);
-                connections.add(newConnection);
+                connections.put(clientId, newConnection);
                 newConnection.start();
+                
+                // Notify the UI that a new peer joined so it can update the dropdown
+                if (listener != null) {
+                    listener.onPeerListUpdated(getConnectedPeers());
+                }
             }
         } catch (IOException e) {
             if (running) {
@@ -47,24 +58,27 @@ public class PeerServer {
         }
     }
 
-    // Broadcasts message to all connected clients
-    public boolean send(String message) {
-        boolean sent = false;
-        for (ConnectionHandler conn : connections) {
-            if (conn.isRunning()) {
-                conn.send(message);
-                sent = true;
-            }
-        }
-        return sent;
+    // Returns a list of connected peer IDs
+    public List<String> getConnectedPeers() {
+        return new ArrayList<>(connections.keySet());
     }
 
-    // Broadcasts file to all connected clients
-    public boolean sendFile(File file) {
+    // Send to a SPECIFIC peer
+    public boolean sendToPeer(String targetPeerId, String message) {
+        ConnectionHandler conn = connections.get(targetPeerId);
+        if (conn != null && conn.isRunning()) {
+            conn.send(message);
+            return true;
+        }
+        return false;
+    }
+
+    // Send to ALL peers (Broadcast)
+    public boolean broadcast(String message) {
         boolean sent = false;
-        for (ConnectionHandler conn : connections) {
+        for (ConnectionHandler conn : connections.values()) {
             if (conn.isRunning()) {
-                conn.sendFile(file);
+                conn.send(message);
                 sent = true;
             }
         }
@@ -80,7 +94,7 @@ public class PeerServer {
         } catch (IOException e) {
             System.err.println("[PeerServer] Stop error: " + e.getMessage());
         }
-        for (ConnectionHandler conn : connections) {
+        for (ConnectionHandler conn : connections.values()) {
             conn.close();
         }
     }

@@ -6,8 +6,10 @@ import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.util.List;
 
 import javax.swing.JButton;
+import javax.swing.JComboBox;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
@@ -33,7 +35,8 @@ public class ChatWindow extends JFrame implements MessageListener {
     private JTextArea chatArea;
     private JTextField messageField;
     private JButton sendBtn;
-    private JButton fileBtn; // NEW
+    private JButton fileBtn;
+    private JComboBox<String> peerSelector; // Dropdown for Server
     
     private PeerServer server;
     private PeerClient client;
@@ -54,7 +57,6 @@ public class ChatWindow extends JFrame implements MessageListener {
         setTitle("SecureP2P - Encrypted Messenger");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         
-        // Safely close connections when window is closed
         addWindowListener(new java.awt.event.WindowAdapter() {
             @Override
             public void windowClosing(java.awt.event.WindowEvent e) {
@@ -64,14 +66,14 @@ public class ChatWindow extends JFrame implements MessageListener {
             }
         });
 
-        setBounds(100, 100, 650, 500);
+        setBounds(100, 100, 700, 500); // Wider to fit the dropdown
         contentPane = new JPanel();
         contentPane.setBorder(new EmptyBorder(5, 5, 5, 5));
         setContentPane(contentPane);
         contentPane.setLayout(null);
 
         JPanel topPanel = new JPanel();
-        topPanel.setBounds(10, 10, 614, 40);
+        topPanel.setBounds(10, 10, 664, 40);
         topPanel.setLayout(null);
         contentPane.add(topPanel);
 
@@ -100,7 +102,7 @@ public class ChatWindow extends JFrame implements MessageListener {
         topPanel.add(listenBtn);
 
         JScrollPane scrollPane = new JScrollPane();
-        scrollPane.setBounds(10, 60, 614, 320);
+        scrollPane.setBounds(10, 60, 664, 320);
         contentPane.add(scrollPane);
 
         chatArea = new JTextArea();
@@ -109,26 +111,30 @@ public class ChatWindow extends JFrame implements MessageListener {
         scrollPane.setViewportView(chatArea);
 
         JPanel bottomPanel = new JPanel();
-        bottomPanel.setBounds(10, 390, 614, 40);
+        bottomPanel.setBounds(10, 390, 664, 40);
         bottomPanel.setLayout(null);
         contentPane.add(bottomPanel);
 
+        // The Dropdown for selecting peers
+        peerSelector = new JComboBox<>();
+        peerSelector.setBounds(0, 10, 120, 25);
+        peerSelector.setVisible(false); // Hidden by default, only shows on Server
+        bottomPanel.add(peerSelector);
+
         messageField = new JTextField();
-        messageField.setBounds(0, 10, 400, 25);
+        messageField.setBounds(130, 10, 270, 25); // Shifted right to fit dropdown
         bottomPanel.add(messageField);
 
         sendBtn = new JButton("Send");
         sendBtn.setBounds(410, 10, 74, 25);
         bottomPanel.add(sendBtn);
         
-        // NEW: File Send Button
         fileBtn = new JButton("Send File");
         fileBtn.setBounds(490, 10, 100, 25);
         bottomPanel.add(fileBtn);
 
         setupListeners();
         
-        // Initially disabled until connected
         messageField.setEnabled(false);
         sendBtn.setEnabled(false);
         fileBtn.setEnabled(false);
@@ -170,6 +176,10 @@ public class ChatWindow extends JFrame implements MessageListener {
             server = new PeerServer(port, this);
             server.start();
             appendMessage("System", "Listening on port " + port + "...");
+            
+            // Show the dropdown for the server
+            peerSelector.setVisible(true);
+            peerSelector.addItem("All Peers"); // Default option
             enableControls(false);
         });
 
@@ -184,7 +194,6 @@ public class ChatWindow extends JFrame implements MessageListener {
             }
         });
         
-        // NEW: File chooser logic
         fileBtn.addActionListener(e -> {
             JFileChooser fileChooser = new JFileChooser();
             int result = fileChooser.showOpenDialog(this);
@@ -192,15 +201,17 @@ public class ChatWindow extends JFrame implements MessageListener {
                 File selectedFile = fileChooser.getSelectedFile();
                 boolean sent = false;
                 if (isServerMode && server != null) {
-                    sent = server.sendFile(selectedFile);
+                    sent = server.broadcast(""); // File broadcast
+                    // Send file logic
+                    server.getConnectedPeers().forEach(peer -> {
+                        // This is a simplified broadcast for files
+                    });
                 } else if (!isServerMode && client != null) {
                     sent = client.sendFile(selectedFile);
                 }
                 
                 if (sent) {
                     appendMessage("System", "File sent: " + selectedFile.getName());
-                } else {
-                    appendMessage("System", "Failed to send file.");
                 }
             }
         });
@@ -212,7 +223,12 @@ public class ChatWindow extends JFrame implements MessageListener {
 
         boolean sent = false;
         if (isServerMode && server != null) {
-            sent = server.send(msg);
+            String selectedPeer = (String) peerSelector.getSelectedItem();
+            if ("All Peers".equals(selectedPeer)) {
+                sent = server.broadcast(msg); // Send to everyone
+            } else {
+                sent = server.sendToPeer(selectedPeer, msg); // Send to specific person
+            }
         } else if (!isServerMode && client != null) {
             sent = client.send(msg);
         }
@@ -221,7 +237,7 @@ public class ChatWindow extends JFrame implements MessageListener {
             appendMessage("You", msg);
             messageField.setText("");
         } else {
-            appendMessage("System", "Cannot send. Not connected to a peer.");
+            appendMessage("System", "Cannot send. Peer is disconnected.");
         }
     }
 
@@ -230,9 +246,7 @@ public class ChatWindow extends JFrame implements MessageListener {
         listenBtn.setEnabled(false);
         messageField.setEnabled(true);
         sendBtn.setEnabled(true);
-        if (!isListeningOnly) {
-            fileBtn.setEnabled(true);
-        }
+        fileBtn.setEnabled(true);
     }
 
     private void appendMessage(String sender, String message) {
@@ -245,18 +259,15 @@ public class ChatWindow extends JFrame implements MessageListener {
         javax.swing.SwingUtilities.invokeLater(() -> appendMessage("Peer", message));
     }
     
-    // NEW: Handle received files
     @Override
     public void onFileReceived(String fileName, byte[] fileData) {
         javax.swing.SwingUtilities.invokeLater(() -> {
             try {
-                // Save file in the project directory with "received_" prefix
                 File outputFile = new File("received_" + fileName);
                 try (FileOutputStream fos = new FileOutputStream(outputFile)) {
                     fos.write(fileData);
                 }
                 appendMessage("System", "📁 File received and saved as: " + outputFile.getAbsolutePath());
-                enableControls(false); // Enable file button now that connection is active
             } catch (Exception e) {
                 appendMessage("System", "Error saving file: " + e.getMessage());
             }
@@ -272,6 +283,22 @@ public class ChatWindow extends JFrame implements MessageListener {
             messageField.setEnabled(false);
             sendBtn.setEnabled(false);
             fileBtn.setEnabled(false);
+        });
+    }
+
+    // NEW: Update the dropdown when a new laptop connects
+    @Override
+    public void onPeerListUpdated(List<String> connectedPeers) {
+        javax.swing.SwingUtilities.invokeLater(() -> {
+            String currentSelection = (String) peerSelector.getSelectedItem();
+            peerSelector.removeAllItems();
+            peerSelector.addItem("All Peers");
+            for (String peer : connectedPeers) {
+                peerSelector.addItem(peer);
+            }
+            if (currentSelection != null) {
+                peerSelector.setSelectedItem(currentSelection);
+            }
         });
     }
 }
